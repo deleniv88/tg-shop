@@ -3,8 +3,10 @@ import { requireAdmin } from "@/lib/admin";
 import { money } from "@/lib/money";
 import { ORDER_STATUS, PAYMENT_STATUS } from "@/lib/i18n";
 import type { Order, OrderStatus } from "@/lib/types";
+import { setOrderStatus } from "../actions";
 
-const FILTERS: (OrderStatus | "all")[] = ["all", "new", "confirmed", "shipped", "completed", "cancelled"];
+const STATUSES: OrderStatus[] = ["new", "confirmed", "shipped", "completed", "cancelled"];
+const FILTERS: (OrderStatus | "all")[] = ["all", ...STATUSES];
 
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
   const { status } = await searchParams;
@@ -86,7 +88,17 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                   </Link>
                 </td>
                 <td>{o.source === "tg" ? "✈️ Telegram" : "🌐 Сайт"}</td>
-                <td><span className={`pill ${o.status}`}>{ORDER_STATUS[o.status].uk}</span></td>
+                <td>
+                  <form action={setOrderStatus} className="row" style={{ gap: 6 }}>
+                    <input type="hidden" name="id" value={o.id} />
+                    <select name="status" defaultValue={o.status} className={`pill ${o.status}`} style={{ border: 0, cursor: "pointer" }} aria-label="Статус">
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s}>{ORDER_STATUS[s].uk}</option>
+                      ))}
+                    </select>
+                    <button className="btn sm ghost" style={{ height: 26, padding: "0 8px" }} title="Змінити статус">✓</button>
+                  </form>
+                </td>
                 <td><span className={`pill ${o.payment_status}`}>{PAYMENT_STATUS[o.payment_status].uk}</span></td>
                 <td style={{ textAlign: "right" }}><b>{money(o.total, o.currency, "uk")}</b></td>
               </tr>

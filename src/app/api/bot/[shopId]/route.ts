@@ -3,9 +3,9 @@ import { db } from "@/lib/supabase/admin";
 import { getShopById } from "@/lib/shop";
 import { tg } from "@/lib/telegram";
 import { sendWelcome } from "@/lib/bot";
-import { managerKeyboard, managerText, notifyCustomer } from "@/lib/notify";
+import { notifyCustomer, rememberCard, syncManagerCards } from "@/lib/notify";
 import { statusLabel } from "@/lib/i18n";
-import type { Lang, Order, OrderItem, OrderStatus } from "@/lib/types";
+import type { Lang, OrderStatus } from "@/lib/types";
 
 type Update = {
   message?: { chat: { id: number; type: string }; from?: { language_code?: string }; text?: string };
@@ -61,16 +61,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ shopId:
         .select("*")
         .single();
       if (order) {
-        const { data: items } = await db().from("order_items").select("*").eq("order_id", orderId);
-        if (cq.message) {
-          await tg(token, "editMessageText", {
-            chat_id: cq.message.chat.id,
-            message_id: cq.message.message_id,
-            text: managerText(shop, order as Order, (items as OrderItem[]) ?? []),
-            parse_mode: "HTML",
-            reply_markup: managerKeyboard(order as Order),
-          }).catch(() => {});
-        }
+        // cards sent before tracking existed are picked up here, then every card of the order is refreshed
+        if (cq.message) await rememberCard(orderId, cq.message.chat.id, cq.message.message_id);
+        await syncManagerCards(shop, orderId);
         await notifyCustomer(shop, orderId);
       }
       await tg(token, "answerCallbackQuery", {
