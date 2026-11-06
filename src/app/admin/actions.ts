@@ -8,7 +8,7 @@ import { userDb } from "@/lib/supabase/server";
 import { db } from "@/lib/supabase/admin";
 import { l10nFrom, requireAdmin, slugify } from "@/lib/admin";
 import { parseMoney } from "@/lib/money";
-import { notifyCustomer } from "@/lib/notify";
+import { notifyCustomer, syncManagerCards } from "@/lib/notify";
 import { connectBot } from "@/lib/bot";
 import { tg } from "@/lib/telegram";
 import type { OrderStatus } from "@/lib/types";
@@ -40,8 +40,13 @@ export async function setOrderStatus(form: FormData) {
   const { supabase, shop } = await requireAdmin();
   const id = String(form.get("id"));
   const status = String(form.get("status")) as OrderStatus;
+  const { data: prev } = await supabase.from("orders").select("status").eq("id", id).eq("shop_id", shop.id).maybeSingle();
+  if (!prev || prev.status === status) return;
   const { error } = await supabase.from("orders").update({ status }).eq("id", id).eq("shop_id", shop.id);
-  if (!error) await notifyCustomer(shop, id);
+  if (!error) {
+    await syncManagerCards(shop, id);
+    await notifyCustomer(shop, id);
+  }
   revalidatePath(`/admin/orders/${id}`);
   revalidatePath("/admin");
 }
@@ -49,8 +54,17 @@ export async function setOrderStatus(form: FormData) {
 export async function setPaymentStatus(form: FormData) {
   const { supabase, shop } = await requireAdmin();
   const id = String(form.get("id"));
-  await supabase.from("orders").update({ payment_status: String(form.get("payment_status")) }).eq("id", id).eq("shop_id", shop.id);
+  const { error } = await supabase
+    .from("orders")
+    .update({ payment_status: String(form.get("payment_status")) })
+    .eq("id", id)
+    .eq("shop_id", shop.id);
+  if (!error) {
+    await syncManagerCards(shop, id);
+    await notifyCustomer(shop, id);
+  }
   revalidatePath(`/admin/orders/${id}`);
+  revalidatePath("/admin");
 }
 
 // ───────── products ─────────

@@ -72,14 +72,60 @@ export async function notifyManager(shop: Shop, orderId: string, prefix?: string
     if (!s.bot_token || !s.manager_chat_id) return;
     const { order, items } = await loadOrder(orderId);
     const text = (prefix ? `${prefix}\n\n` : "") + managerText(shop, order, items);
-    await tg(s.bot_token, "sendMessage", {
+    const sent = await tg<{ message_id: number }>(s.bot_token, "sendMessage", {
       chat_id: s.manager_chat_id,
       text,
       parse_mode: "HTML",
       reply_markup: managerKeyboard(order),
     });
+    await rememberCard(orderId, s.manager_chat_id, sent.message_id);
   } catch (e) {
     console.error("notifyManager", e);
+  }
+}
+
+/** Remember a manager-chat message that shows this order, so later status changes can update it. */
+export async function rememberCard(orderId: string, chatId: string | number, messageId: number) {
+  await db()
+    .from("order_tg_messages")
+    .upsert(
+      { order_id: orderId, chat_id: String(chatId), message_id: messageId },
+      { onConflict: "order_id,chat_id,message_id", ignoreDuplicates: true },
+    );
+}
+
+/**
+ * Re-render every Telegram card of an order (text + status buttons) after its status or payment
+ * changed — from the admin panel or from a button in Telegram. Never throws.
+ */
+export async function syncManagerCards(shop: Shop, orderId: string) {
+  try {
+    const s = await getSecrets(shop.id);
+    if (!s.bot_token) return;
+    const { data: cards } = await db().from("order_tg_messages").select("chat_id, message_id").eq("order_id", orderId);
+    if (!cards?.length) return;
+    const { order, items } = await loadOrder(orderId);
+    const text = managerText(shop, order, items);
+    for (const c of cards) {
+      try {
+        await tg(s.bot_token, "editMessageText", {
+          chat_id: c.chat_id,
+          message_id: c.message_id,
+          text,
+          parse_mode: "HTML",
+          reply_markup: managerKeyboard(order),
+        });
+      } catch (e) {
+        const msg = (e as Error).message;
+        if (msg.includes("message to edit not found") || msg.includes("message can't be edited")) {
+          await db().from("order_tg_messages").delete().eq("order_id", orderId).eq("message_id", c.message_id);
+        } else if (!msg.includes("message is not modified")) {
+          console.error("syncManagerCards", msg);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("syncManagerCards", e);
   }
 }
 
